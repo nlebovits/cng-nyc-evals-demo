@@ -1,0 +1,10 @@
+# DuckDB working database. 518 MB, over GitHub's 100 MB file limit.
+# Rebuild it from the committed SQL:
+#   duckdb analysis.duckdb < analysis.sql
+analysis.duckdb
+analysis.duckdb.wal
+
+# Quarto build directories. The rendered HTML is committed on purpose,
+# because GitHub Pages serves it directly.
+/.quarto/
+/*_files/

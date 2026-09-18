@@ -1,0 +1,11 @@
+metric,value
+input_rows,119.0
+unique_submissions,118.0
+unique_analysis_properties,118.0
+axis_repaired_rows,1.0
+resolved_input_rows,118.0
+unresolved_input_rows,1.0
+matched_fields,793.0
+nearby_unmatched_fields,172.0
+flagged_properties,18.0
+flagged_without_contact,0.0

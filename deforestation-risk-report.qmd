@@ -1,0 +1,306 @@
+---
+title: "Deforestation risk assessment"
+subtitle: "Goiás property portfolio"
+author: "Reproducible assessment from the supplied portfolio"
+date: last-modified
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+    fig-width: 10
+execute:
+  echo: true
+  warning: false
+  error: false
+---
+
+```{=html}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<style>
+.callout-note { border-left-color: #357a38; }
+.metric-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.8rem; margin:1rem 0; }
+.metric { padding:.8rem 1rem; border:1px solid #d9e1e8; border-radius:.4rem; background:#f8fafb; }
+.metric strong { display:block; font-size:1.55rem; }
+.ojs-table table { font-size:.83rem; }
+</style>
+```
+
+## Decision summary
+
+This assessment flags **18 of 117 successfully resolved CAR properties** for follow-up. Together they contain **114.802 ha** of 2021–2024 loss across relevant commodity fields. Two flagged cattle properties have a routed slaughter point within 10 km, so that facility overrides the default município cooperative contact. The other 16 use the município cooperative. No flagged property is missing a follow-up contact.
+
+```{=html}
+<div class="metric-grid">
+  <div class="metric"><strong>119</strong>input rows</div>
+  <div class="metric"><strong>118</strong>unique submissions</div>
+  <div class="metric"><strong>18</strong>follow-ups</div>
+  <div class="metric"><strong>114.802 ha</strong>relevant loss</div>
+  <div class="metric"><strong>2</strong>facility overrides</div>
+  <div class="metric"><strong>1</strong>unresolved row</div>
+</div>
+```
+
+The flag is a screening signal, not proof of illegal deforestation. It means that at least one matched field in cattle, oil palm, soya, or coffee has a positive Trazo3 2021–2024 loss value. Follow-up should verify the detected change, its date, authorization, and supply-chain relationship.
+
+## Properties requiring follow-up
+
+The table below is the operational hand-off. Search for a property, município, class, contact, or status; click column headings to sort. `membership_muni` is the default cooperative contact. `slaughter_point` appears only when a qualifying routed facility is less than 10 km from the CAR centroid.
+
+```{ojs}
+results = FileAttachment("property_results.csv").csv({typed: true})
+flagged = results.filter(d => d.follow_up_required === true)
+```
+
+```{ojs}
+viewof followup_search = Inputs.search(flagged, {
+  placeholder: "Search flagged properties and contacts…"
+})
+```
+
+```{ojs}
+Inputs.table(followup_search, {
+  columns: [
+    "cod_imovel", "municipio", "dominant_class", "post2020_loss_ha",
+    "matched_field_count", "loss_field_count", "contact_entity_id",
+    "contact_entity_type", "contact_tier", "contact_distance_m",
+    "facility_override", "contact_selection_status"
+  ],
+  header: {
+    cod_imovel: "CAR property", municipio: "Município", dominant_class: "Dominant class",
+    post2020_loss_ha: "Loss (ha)", matched_field_count: "Matched fields",
+    loss_field_count: "Loss fields", contact_entity_id: "Contact ID",
+    contact_entity_type: "Contact type", contact_tier: "Contact tier",
+    contact_distance_m: "Distance (m)", facility_override: "Override",
+    contact_selection_status: "Selection rationale"
+  },
+  sort: "post2020_loss_ha",
+  reverse: true,
+  rows: 20,
+  width: {cod_imovel: 360, contact_selection_status: 310}
+})
+```
+
+## Interactive map
+
+Red parcels require follow-up, green parcels were assessed but not flagged, and grey geometries have no matched fields. Click a property for its risk and contact details. The map shows only rows that resolved to a real geometry. Rows with an unresolved geometry carry a placeholder coordinate, so plotting them would assert a location the source data does not support. The count of excluded rows appears under the map. The map opens on satellite imagery. Use the control in the top right to switch to the street basemap, and read the legend in the bottom right for the parcel colours. Basemap tiles need internet access. The portfolio polygons and results are embedded in the HTML.
+
+```{ojs}
+portfolio = FileAttachment("property_results.geojson").json()
+L = await require("leaflet@1.9.4")
+```
+
+```{ojs}
+map_view = {
+  // One portfolio row never resolved to a geometry. The pipeline emits it as a
+  // placeholder Point at (-35, -10), which falls in the Atlantic, about 830 km
+  // east of the Goias parcels. Including it in the fitted bounds moves the map
+  // centre off the data, so the map shows located features only and the count
+  // of excluded rows is reported below the map.
+  const located = {
+    type: "FeatureCollection",
+    features: portfolio.features.filter(
+      f => f.geometry && f.properties.assessment_status !== "unresolved_geometry"
+    )
+  };
+
+  // One palette drives both the parcel style and the legend, so the two cannot
+  // drift apart. The colours are brighter than a print palette because the
+  // default basemap is satellite imagery, and mid-tone greens and greys
+  // disappear against vegetation and bare soil.
+  const palette = [
+    {color: "#ff3b30", label: "Follow-up required"},
+    {color: "#46d160", label: "Assessed, no follow-up"},
+    {color: "#e3ecf2", label: "No matched fields"}
+  ];
+  const classOf = p => p.follow_up_required ? 0
+    : (p.assessment_status === "no_matched_fields" || p.assessment_status === "unresolved_geometry") ? 2
+    : 1;
+
+  const container = html`<div style="height:650px;width:100%;border:1px solid #ccd5dc;border-radius:4px"></div>`;
+  const map = L.map(container, {scrollWheelZoom: false});
+
+  const layer = L.geoJSON(located, {
+    style: feature => {
+      const p = feature.properties;
+      const color = palette[classOf(p)].color;
+      return {
+        color,
+        weight: 2.2,
+        opacity: 1,
+        fillColor: color,
+        fillOpacity: p.follow_up_required ? 0.45 : 0.22
+      };
+    },
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+      radius: 7, color: "#e3ecf2", fillColor: "#e3ecf2", fillOpacity: 0.8, weight: 2.2
+    }),
+    onEachFeature: (feature, shape) => {
+      const p = feature.properties;
+      const distance = p.contact_distance_m == null ? "n/a" : `${Number(p.contact_distance_m).toLocaleString()} m`;
+      shape.bindPopup(`
+        <strong>${p.cod_imovel || "Unresolved input"}</strong><br>
+        ${p.municipio || "Município unavailable"}<br>
+        <b>Status:</b> ${p.assessment_status}<br>
+        <b>Dominant class:</b> ${p.dominant_class || "n/a"}<br>
+        <b>2021–2024 relevant loss:</b> ${Number(p.post2020_loss_ha || 0).toFixed(3)} ha<br>
+        <b>Contact:</b> ${p.contact_entity_id || "n/a"} (${p.contact_tier || "n/a"})<br>
+        <b>Contact distance:</b> ${distance}
+      `);
+    }
+  });
+  const bounds = layer.getBounds();
+
+  // Set the view before the first tile request. Leaflet measures the container
+  // to choose a zoom, and this container is still detached from the document,
+  // so it measures 0x0. fitBounds on a 0x0 viewport cannot fit anything and
+  // falls back to maxZoom, which starts the map at zoom 19. Every pan and zoom
+  // out from there requests another set of tiles, which is what made the
+  // basemap slow to settle.
+  if (bounds.isValid()) map.setView(bounds.getCenter(), 9);
+  else map.setView([-15.73, -51.36], 9);
+
+  // Esri World Imagery serves tiles as {z}/{y}/{x}, which is not the {z}/{x}/{y}
+  // order OpenStreetMap uses. Swapping the two silently returns the wrong tiles.
+  const satellite = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom: 19,
+      attribution: "Tiles &copy; Esri. Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+    }
+  );
+
+  // Single host rather than the {s} subdomain rotation. OpenStreetMap has
+  // deprecated a/b/c, and one host lets the browser reuse one HTTP/2
+  // connection instead of opening three.
+  const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  });
+
+  satellite.addTo(map);
+  layer.addTo(map);
+
+  L.control.layers(
+    {"Satellite imagery": satellite, "Street map": streets},
+    {"Portfolio properties": layer},
+    {collapsed: false}
+  ).addTo(map);
+
+  const legend = L.control({position: "bottomright"});
+  legend.onAdd = () => {
+    const div = L.DomUtil.create("div");
+    div.style.cssText = "background:rgba(255,255,255,.93);padding:.55rem .7rem;" +
+      "border:1px solid #b9c4cc;border-radius:4px;font:12px/1.45 system-ui,sans-serif;" +
+      "box-shadow:0 1px 4px rgba(0,0,0,.3)";
+    div.innerHTML = "<div style='font-weight:600;margin-bottom:.35rem'>Property status</div>" +
+      palette.map(c =>
+        "<div style='display:flex;align-items:center;gap:.45rem;margin-top:.2rem'>" +
+        `<span style="width:14px;height:14px;flex:none;border-radius:2px;border:2px solid ${c.color};background:${c.color}44"></span>` +
+        `<span>${c.label}</span></div>`
+      ).join("");
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+  legend.addTo(map);
+
+  // Fit once the container has a real size. This fires as soon as Observable
+  // inserts the node, and it is a no-op while the element measures 0x0.
+  const refit = new ResizeObserver(() => {
+    if (!container.clientWidth || !container.clientHeight) return;
+    map.invalidateSize();
+    if (bounds.isValid()) map.fitBounds(bounds, {padding: [15, 15]});
+    refit.disconnect();
+  });
+  refit.observe(container);
+
+  return container;
+}
+```
+
+```{ojs}
+md`${portfolio.features.filter(f => !f.geometry || f.properties.assessment_status === "unresolved_geometry").length} of ${portfolio.features.length} portfolio rows are not drawn, because their geometry did not resolve. They stay in every table and total in this report.`
+```
+
+## Method
+
+### Property resolution
+
+Each input row receives a stable row number and a submission hash. Exact duplicates are represented once in the property analysis but their input row numbers and counts remain in the results. Supplied CAR IDs are resolved by exact `cod_imovel`. ID-less points resolve by CAR containment. ID-less polygons must cover at least 99.9% of a CAR and be at least 99.9% covered by it; this operationalizes the specification's “geometric match” as a near-exact, two-way match rather than accepting any polygon located inside a CAR. Lowest `cod_imovel` is the deterministic tie-break.
+
+One polygon had axes swapped. Its original bounds were outside a conservative Brazil extent (longitude −74 to −34, latitude −34 to 6) and its flipped bounds were inside, so it was repaired. No other geometry was changed. One input point at `POINT (-35 -10)` did not resolve to a CAR and remains explicitly visible as `unresolved_geometry`.
+
+```sql
+-- The auditable implementation is in analysis.sql. Core axis rule:
+CASE WHEN NOT original_in_brazil_extent AND flipped_in_brazil_extent
+     THEN ST_FlipCoordinates(original_geometry)
+     ELSE original_geometry END AS input_geometry
+
+-- ID-less polygon match:
+WHERE input_covered >= 0.999 AND car_covered >= 0.999
+```
+
+### Field matching and risk
+
+All area operations use Brazil Polyconic **EPSG:5880**. A field qualifies if at least 0.667 of its area is in one listed CAR, or at least 0.667 is in the dissolved parcel union after a 25 m buffer. Dissolving before intersection prevents overlap double-counting. Each matched field is assigned to the parcel containing its largest area fraction; ties go to the lowest `cod_imovel`.
+
+Risk uses `deforestarea2124` and converts square metres to hectares by dividing by 10,000. A property is flagged when this value is positive for at least one matched field in classes 15, 21, 35, 39, or 46. The dominant class is calculated from the total full-field area of **all** matched fields, with the lowest `mbmode24` winning area ties.
+
+```sql
+matched = max_parcel_overlap_fraction >= 0.667
+       OR buffered_union_overlap_fraction >= 0.667;
+
+post2020_loss_ha = sum(deforestarea2124) / 10000.0;
+```
+
+The analysis matched 793 fields. A further 172 fields touched the buffered portfolio neighborhood but failed both 0.667 tests; these are retained in `field_match_diagnostics` and counted in the audit summary rather than silently disappearing. Twenty-two properties had no matched field. Seventy-seven resolved properties had matched fields but no relevant post-2020 loss.
+
+### Contact selection
+
+The default candidate is the `membership_muni` cooperative whose entity ID equals the seven-digit municipality code embedded in the resolved CAR ID. Applicable routed tiers come from the dominant class. Coffee and palm oil have no facility coverage and no substitute is introduced. Distances are calculated from CAR centroid to facility in EPSG:5880. An `intake_point` or `slaughter_point` under 10,000 m overrides membership; a `mill_point` never does. Candidate ordering is override eligibility, distance ascending, evidence value descending, then entity ID ascending.
+
+Two properties receive facility overrides:
+
+```{ojs}
+Inputs.table(flagged.filter(d => d.facility_override === true), {
+  columns: ["cod_imovel", "municipio", "post2020_loss_ha", "contact_entity_id", "contact_tier", "contact_distance_m"],
+  header: {cod_imovel: "CAR property", municipio: "Município", post2020_loss_ha: "Loss (ha)", contact_entity_id: "Contact ID", contact_tier: "Tier", contact_distance_m: "Distance (m)"}
+})
+```
+
+## Audit and limitations
+
+```{ojs}
+audit = FileAttachment("audit_summary.csv").csv({typed: true})
+Inputs.table(audit, {columns: ["metric", "value"], header: {metric: "Audit metric", value: "Count"}, rows: 20})
+```
+
+- The input has 119 rows and one exact duplicate, leaving 118 unique submissions: 117 resolved CAR properties and one unresolved geometry. The duplicate's two source rows remain listed on its result.
+- The unresolved point is not treated as low risk; it has no assessment and requires data correction if it belongs in scope.
+- “Any value > 0” is applied exactly. Very small positive detections are therefore flagged; no minimum mapping unit or materiality threshold was added.
+- Field area means the full area of each qualified matched field, not only its intersection with the parcel. This is the natural reading of “total matched-field area” and is stated here because it affects dominant class.
+- The coarse Brazil extent is used only for the narrowly constrained axis-repair test. It is not used to resolve properties or assess risk.
+- Trazo3 is the specified Goiás layer. A successfully resolved property outside Goiás would have no field coverage and would be reported as such, not inferred safe.
+- Contact IDs are dataset identifiers, not names or personal contact details. Operational teams should resolve the entity ID in their contact system before outreach.
+
+## Reproduce and inspect
+
+Run the analysis from the project root with DuckDB 1.4.x and its bundled `spatial` and `httpfs` extensions, then render the report:
+
+```bash
+duckdb analysis.duckdb < analysis.sql
+quarto render deforestation-risk-report.qmd
+```
+
+The complete executable SQL is [analysis.sql](analysis.sql). Supporting audit extracts are [property resolution](property_resolution.csv), [matched fields](matched_fields.csv), [property results](property_results.csv), and [audit summary](audit_summary.csv). The interactive map reads [property GeoJSON](property_results.geojson).
+
+Authoritative sources specified for this assessment:
+
+- [Trazo3 Goiás 2024 fields](https://data.source.coop/wri-data-lab/trazofields/trazo3-fields/trazo3_brazil_goias_2024.parquet)
+- [Brazil CAR parcels](https://data.source.coop/tristangruppwri/cadastral/brazil-car-area-imovel/brazil_car_area_imovel.parquet)
+- [Brazil commodity infrastructure](https://data.source.coop/tristangruppwri/soft-commodity-infrastructure/facilities/BR_facilities.parquet)
+
+The local DuckDB database retains the intermediate tables `input_rows`, `property_resolution`, `field_match_diagnostics`, `matched_fields`, `contact_candidates`, and `selected_contacts` for row-level audit.
